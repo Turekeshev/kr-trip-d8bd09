@@ -220,7 +220,7 @@ function nextCard(day, nu) {
       h('div', { class: 'meta' }, `${it.t}${it.e ? '–' + it.e : ''}`, !nu.now && it.leg ? ' · ' + it.leg.text : '')),
     h('div', { class: 'actions' },
       h('button', { class: 'btn primary', onClick: () => openTaxi(it) }, icon('taxi'), 'Таксисту'),
-      it.naver ? h('a', { class: 'btn', href: it.naver, target: '_blank', rel: 'noopener' }, 'Naver') : null));
+      it.naver ? h('button', { class: 'btn', onClick: () => openNaver(it) }, 'Naver') : null));
 }
 
 /* ---------- forecast ---------- */
@@ -364,7 +364,7 @@ function showSheet(it, opts) {
     h('div', { class: 'actions' },
       h('button', { class: 'btn primary block', onClick: () => openTaxi(it) }, icon('taxi'), 'Показать таксисту')),
     h('div', { class: 'row3' },
-      it.naver ? h('a', { class: 'btn', href: it.naver, target: '_blank', rel: 'noopener' }, 'Naver') : null,
+      it.naver ? h('button', { class: 'btn', onClick: () => openNaver(it) }, 'Naver') : null,
       it.google ? h('a', { class: 'btn', href: it.google, target: '_blank', rel: 'noopener' }, 'Google') : null,
       (it.ko || road) ? h('button', { class: 'btn', onClick: () => copy([it.ko, road].filter(Boolean).join('\n')) }, icon('copy'), 'Адрес') : null),
     sections,
@@ -386,6 +386,33 @@ function altCard(a, parent, label) {
     h('div', { class: 'actions' },
       h('button', { class: 'btn', onClick: () => openAltSheet(a, parent, label) }, 'Подробнее'),
       h('button', { class: 'btn', onClick: () => openTaxi(a) }, icon('taxi'), 'Таксисту')));
+}
+
+/* ---------- Naver Map app ---------- */
+// Карточка места открывается сразу в приложении Naver Map (nmap://); если приложение не ответило — сайт.
+const NMAP_APPNAME = encodeURIComponent(location.origin + location.pathname);
+function naverAppUrl(it) {
+  const id = /place\/(\d+)/.exec(it.naver || '');
+  if (id) return `nmap://place?id=${id[1]}&appname=${NMAP_APPNAME}`;
+  const q = /\/search\/([^/?#]+)/.exec(it.naver || '');
+  const query = q ? decodeURIComponent(q[1]) : (it.ko || '');
+  return query ? `nmap://search?query=${encodeURIComponent(query)}&appname=${NMAP_APPNAME}` : null;
+}
+function openNaver(it) {
+  const app = naverAppUrl(it);
+  if (!app) { window.open(it.naver, '_blank', 'noopener'); return; }
+  let left = false;
+  const mark = () => { left = true; };
+  document.addEventListener('visibilitychange', mark, { once: true });
+  window.addEventListener('pagehide', mark, { once: true });
+  window.addEventListener('blur', mark, { once: true });
+  window.location.href = app;
+  setTimeout(() => {
+    document.removeEventListener('visibilitychange', mark);
+    window.removeEventListener('pagehide', mark);
+    window.removeEventListener('blur', mark);
+    if (!left && !document.hidden) window.open(it.naver, '_blank', 'noopener');
+  }, 1800);
 }
 
 /* ---------- taxi / officer ---------- */
