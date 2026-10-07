@@ -18,11 +18,34 @@ const state = {
 };
 
 /* ---------- dom helpers ---------- */
+const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// Тактильная кнопка: на iPhone палец попадает в невидимый системный переключатель iOS,
+// и iOS даёт короткий отклик Taptic Engine (Web API для вибрации в Safari нет).
+function hapticSwitch() {
+  const i = document.createElement('input');
+  i.type = 'checkbox';
+  i.setAttribute('switch', '');
+  i.className = 'haptic';
+  i.tabIndex = -1;
+  i.setAttribute('aria-hidden', 'true');
+  return i;
+}
+
 function h(tag, attrs, ...kids) {
+  const haptic = attrs && attrs.haptic;
+  if (haptic && tag === 'button') tag = 'div';
   const el = document.createElement(tag);
+  if (haptic) {
+    el.setAttribute('role', 'button');
+    el.tabIndex = 0;
+    el.classList.add('tap');
+    el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); } });
+  }
   for (const [k, v] of Object.entries(attrs || {})) {
-    if (v == null || v === false) continue;
-    if (k === 'class') el.className = v;
+    if (v == null || v === false || k === 'haptic') continue;
+    if (k === 'class') el.className = (el.className ? el.className + ' ' : '') + v;
     else if (k.startsWith('on')) el.addEventListener(k.slice(2).toLowerCase(), v);
     else if (k === 'html') el.innerHTML = v;
     else el.setAttribute(k, v === true ? '' : v);
@@ -31,6 +54,7 @@ function h(tag, attrs, ...kids) {
     if (kid == null || kid === false || kid === '') continue;
     el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
   }
+  if (haptic && IS_IOS) el.append(hapticSwitch());
   return el;
 }
 
@@ -124,6 +148,20 @@ function nextUp(day) {
 }
 
 /* ---------- render: route ---------- */
+function goDay(date) {
+  const list = days();
+  const from = list.findIndex(x => x.date === state.date), to = list.findIndex(x => x.date === date);
+  if (to < 0 || from === to) return;
+  state.anim = to > from ? 'next' : 'prev';
+  state.date = date;
+  render();
+  window.scrollTo({ top: 0, behavior: REDUCED ? 'auto' : 'smooth' });
+}
+function stepDay(delta) {
+  const list = days(), i = list.findIndex(x => x.date === state.date) + delta;
+  if (i >= 0 && i < list.length) goDay(list[i].date);
+}
+
 function renderRoute(root) {
   const list = days();
   const day = currentDay();
@@ -140,7 +178,8 @@ function renderRoute(root) {
         const dd = new Date(d.date + 'T00:00:00Z');
         return h('button', {
           class: 'day-chip' + (d.date === day.date ? ' sel' : '') + (d.date === today ? ' today' : ''),
-          onClick: () => { state.date = d.date; render(); window.scrollTo(0, 0); },
+          haptic: true,
+          onClick: () => goDay(d.date),
         }, h('b', {}, dd.getUTCDate()), h('span', {}, d.dow));
       })));
 
@@ -188,8 +227,9 @@ function sunToggle(day) {
     class: 'pill sun-toggle',
     'aria-label': dark ? `Восход ${time}. Включить светлую тему` : `Закат ${time}. Включить тёмную тему`,
     title: dark ? 'Восход' : 'Закат',
-    onClick: () => setTheme(dark ? 'light' : 'dark', true),
-  }, icon(dark ? 'sunrise' : 'sunset'), time);
+    haptic: true,
+    onClick: () => { state.spinSun = true; setTheme(dark ? 'light' : 'dark', true); },
+  }, h('span', { class: 'sun-ico' + (state.spinSun ? ' spin' : '') }, icon(dark ? 'sunrise' : 'sunset')), h('span', { class: state.spinSun ? 'fade-in' : '' }, time));
 }
 
 function applyTheme() {
@@ -207,6 +247,7 @@ function setTheme(theme, animate) {
   }
   applyTheme();
   render();
+  state.spinSun = false;
 }
 
 function nextCard(day, nu) {
@@ -219,7 +260,7 @@ function nextCard(day, nu) {
       it.ko ? h('div', { class: 'k ko' }, it.ko) : null,
       h('div', { class: 'meta' }, `${it.t}${it.e ? '–' + it.e : ''}`, !nu.now && it.leg ? ' · ' + it.leg.text : '')),
     h('div', { class: 'actions' },
-      h('button', { class: 'btn primary', onClick: () => openTaxi(it) }, icon('taxi'), 'Таксисту'),
+      h('button', { class: 'btn primary', haptic: true, onClick: () => openTaxi(it) }, icon('taxi'), 'Таксисту'),
       it.naver ? h('button', { class: 'btn', onClick: () => openNaver(it) }, 'Naver') : null));
 }
 
@@ -323,7 +364,8 @@ function openSheet(day, idx) {
     footer: close => h('div', { class: 'toggle-done' },
       h('button', {
         class: 'btn block',
-        onClick: () => { store.set(doneKey(day.date, idx), !done); close(); render(); },
+        haptic: true,
+        onClick: () => { store.set(doneKey(day.date, idx), !done); close(); setTimeout(render, 240); },
       }, icon('check'), done ? 'Вернуть в план' : 'Отметить: были здесь')),
   });
 }
@@ -338,7 +380,15 @@ function openAltSheet(a, parent, label) {
 
 function showSheet(it, opts) {
   const box = document.getElementById('sheet');
-  const close = () => { box.classList.remove('open'); box.replaceChildren(); };
+  let closing = false;
+  const close = () => {
+    if (closing) return;
+    closing = true;
+    const sh = box.querySelector('.sheet');
+    if (sh && !sh.classList.contains('fling')) sh.style.animation = '';
+    box.classList.add('closing');
+    setTimeout(() => { box.classList.remove('open', 'closing'); box.replaceChildren(); }, REDUCED ? 0 : 260);
+  };
   const home = it.home ? homeOf(it.home) : null;
   const road = it.home ? (home.ko || '') : (it.road || '');
 
@@ -362,7 +412,7 @@ function showSheet(it, opts) {
     road ? h('div', { class: 'addr ko' }, road) : null,
     it.home && !home.ko ? h('div', { class: 'addr' }, 'Адрес жилья добавьте во вкладке «Документы».') : null,
     h('div', { class: 'actions' },
-      h('button', { class: 'btn primary block', onClick: () => openTaxi(it) }, icon('taxi'), 'Показать таксисту')),
+      h('button', { class: 'btn primary block', haptic: true, onClick: () => openTaxi(it) }, icon('taxi'), 'Показать таксисту')),
     h('div', { class: 'row3' },
       it.naver ? h('button', { class: 'btn', onClick: () => openNaver(it) }, 'Naver') : null,
       it.google ? h('a', { class: 'btn', href: it.google, target: '_blank', rel: 'noopener' }, 'Google') : null,
@@ -372,8 +422,44 @@ function showSheet(it, opts) {
     opts.footer ? opts.footer(close) : null);
 
   fill(box, h('div', { class: 'backdrop', onClick: close }), sheet);
+  box.classList.remove('closing');
   box.classList.add('open');
+  // после въезда снимаем анимацию, иначе она перекрывает перетаскивание пальцем
+  sheet.addEventListener('animationend', e => { if (e.target === sheet && !box.classList.contains('closing')) sheet.style.animation = 'none'; });
+  dragToDismiss(sheet, box.querySelector('.backdrop'), close);
 }
+// Свайп вниз закрывает карточку: лист идёт за пальцем, после отпускания либо уезжает, либо пружинит обратно.
+function dragToDismiss(sheet, backdrop, close) {
+  let y0 = null, t0 = 0, dy = 0;
+  sheet.addEventListener('touchstart', e => {
+    if (sheet.scrollTop > 0) { y0 = null; return; }
+    y0 = e.touches[0].clientY; t0 = Date.now(); dy = 0;
+    sheet.style.transition = 'none';
+  }, { passive: true });
+  sheet.addEventListener('touchmove', e => {
+    if (y0 == null) return;
+    dy = e.touches[0].clientY - y0;
+    if (dy <= 0) { dy = 0; sheet.style.transform = ''; return; }
+    e.preventDefault();
+    sheet.style.transform = `translateY(${dy}px)`;
+    backdrop.style.opacity = String(Math.max(0, 1 - dy / 400));
+  }, { passive: false });
+  sheet.addEventListener('touchend', () => {
+    if (y0 == null) return;
+    const v = dy / Math.max(1, Date.now() - t0);
+    y0 = null;
+    sheet.style.transition = '';
+    if (dy > 110 || v > 0.6) {
+      sheet.style.transform = `translateY(${dy}px)`;
+      requestAnimationFrame(() => { sheet.classList.add('fling'); sheet.style.transform = 'translateY(100%)'; backdrop.style.opacity = '0'; });
+      close();
+    } else {
+      sheet.style.transform = '';
+      backdrop.style.opacity = '';
+    }
+  });
+}
+
 function add(el, ...kids) { el.append(...kids.flat().filter(k => k != null && k !== false && k !== '')); }
 function fill(el, ...kids) { el.replaceChildren(...kids.flat().filter(k => k != null && k !== false && k !== '')); }
 function sec(title, ...kids) { return h('div', { class: 'sec' }, h('h3', {}, title), h('div', { class: 'card' }, kids)); }
@@ -439,8 +525,13 @@ function openTaxi(it) {
     road ? h('div', { class: 'road ko' }, road) : null,
     h('div', { class: 'en' }, en, ' · Please take me to this address'),
     h('div', { class: 'close' }, 'Нажмите, чтобы закрыть'));
-  box.onclick = () => { box.className = 'taxi'; box.replaceChildren(); keepAwake(false); };
+  box.onclick = () => closeTaxi(box);
   keepAwake(true);
+}
+function closeTaxi(box) {
+  box.classList.add('closing');
+  keepAwake(false);
+  setTimeout(() => { box.className = 'taxi'; box.replaceChildren(); }, REDUCED ? 0 : 220);
 }
 function openOfficer() {
   const p = state.personal, box = document.getElementById('taxi');
@@ -460,7 +551,7 @@ function openOfficer() {
     h('div', { class: 'phrase' }, 'Travel information'),
     ...lines.map(([k, v]) => h('div', {}, h('div', { class: 'en', style: 'margin-top:16px' }, k), h('div', { class: 'road', style: 'margin-top:2px' }, v))),
     h('div', { class: 'close' }, 'Нажмите, чтобы закрыть'));
-  box.onclick = () => { box.className = 'taxi'; box.replaceChildren(); keepAwake(false); };
+  box.onclick = () => closeTaxi(box);
   keepAwake(true);
 }
 
@@ -533,6 +624,7 @@ function renderDocs(root) {
       h('div', { class: 'seg' },
         ['alt', 'main'].map(k => h('button', {
           class: state.route === k ? 'sel' : '',
+          haptic: true,
           onClick: () => { state.route = k; store.set('route', k); render(); },
         }, k === 'alt' ? '10 из 10' : 'Основной'))),
       h('div', { class: 'kv', style: 'margin-top:12px' }, h('span', { class: 'k' }, 'Без интернета'), h('span', { class: 'v', id: 'offline-status' }, '…')),
@@ -622,6 +714,16 @@ function render() {
   root.querySelectorAll('.plans').forEach(p => { if (p.scrollLeft > 0) swiped[p.dataset.key] = p.scrollLeft; });
   root.replaceChildren();
   if (state.tab === 'route') renderRoute(root); else renderDocs(root);
+  if (state.anim && !REDUCED) {
+    const wrap = root.querySelector('.wrap');
+    if (wrap) {
+      wrap.classList.add('enter-' + state.anim);
+      wrap.querySelectorAll('.tl > li').forEach((li, k) => li.style.setProperty('--i', Math.min(k, 10)));
+    }
+    const chip = root.querySelector('.day-chip.sel');
+    if (chip && state.anim !== 'fade') chip.classList.add('pop');
+  }
+  state.anim = null;
   root.querySelectorAll('.plans').forEach(p => { if (swiped[p.dataset.key]) p.scrollLeft = swiped[p.dataset.key]; });
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('sel', t.dataset.tab === state.tab));
 }
@@ -630,8 +732,8 @@ function shell() {
   app.replaceChildren(
     h('main', { id: 'view' }),
     h('nav', { class: 'tabs' },
-      h('button', { class: 'tab', 'data-tab': 'route', onClick: () => { state.tab = 'route'; render(); window.scrollTo(0, 0); } }, icon('route'), 'Маршрут'),
-      h('button', { class: 'tab', 'data-tab': 'docs', onClick: () => { state.tab = 'docs'; state.editing = false; render(); window.scrollTo(0, 0); } }, icon('doc'), 'Документы')));
+      h('button', { class: 'tab', 'data-tab': 'route', haptic: true, onClick: () => { if (state.tab !== 'route') { state.anim = 'fade'; state.tab = 'route'; render(); window.scrollTo(0, 0); } } }, icon('route'), 'Маршрут'),
+      h('button', { class: 'tab', 'data-tab': 'docs', haptic: true, onClick: () => { if (state.tab !== 'docs') { state.anim = 'fade'; state.tab = 'docs'; state.editing = false; render(); window.scrollTo(0, 0); } } }, icon('doc'), 'Документы')));
 }
 function pickDate() {
   const today = kstNow().date, list = days();
@@ -723,6 +825,18 @@ async function main() {
   shell();
   state.date = pickDate();
   render();
+  document.addEventListener('touchstart', () => {}, { passive: true }); // включает :active на iOS
+  let sx = null, sy = 0, sTarget = null;
+  document.getElementById('view').addEventListener('touchstart', e => {
+    sx = e.touches[0].clientX; sy = e.touches[0].clientY; sTarget = e.target;
+  }, { passive: true });
+  document.getElementById('view').addEventListener('touchend', e => {
+    if (sx == null || state.tab !== 'route') return;
+    const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
+    const blocked = sTarget && sTarget.closest && sTarget.closest('.plans, .days, input, textarea');
+    sx = null;
+    if (!blocked && Math.abs(dx) > 70 && Math.abs(dy) < 45) stepDay(dx < 0 ? 1 : -1);
+  }, { passive: true });
   refreshForecast();
   window.addEventListener('online', refreshForecast);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { refreshForecast(); if (state.tab === 'route') render(); } });
