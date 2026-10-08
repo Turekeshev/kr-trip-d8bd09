@@ -77,6 +77,7 @@ const ICONS = {
   share: '<path d="M12 3v12M8 7l4-4 4 4"/><path d="M6 12v7a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-7"/>',
   phone: '<path d="M5 4h3l2 5-2.5 1.5a11 11 0 0 0 6 6L15 14l5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>',
+  ticket: '<path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z"/><path d="M14 5v12"/>',
   umbrella: '<path d="M3 12a9 9 0 0 1 18 0z"/><path d="M12 12v6.5a2 2 0 0 1-4 0M12 3v0"/>',
 };
 function icon(name) {
@@ -135,14 +136,64 @@ function routineIcon(it) {
   if (/Дорога/.test(it.routine || '') || it.type === 'Транспорт') return 'transit';
   return null;
 }
+/* ---------- «опаздываем»: сдвиг остатка дня ---------- */
+const delayKey = date => `delay:${state.route}:${date}`;
+function delays(date) { return store.get(delayKey(date), []); }
+function addDelay(date, from, min) { store.set(delayKey(date), [...delays(date), { from, min }]); }
+function resetDelay(date) { store.set(delayKey(date), []); }
+function dayShift(date) { return delays(date).reduce((a, d) => a + d.min, 0); }
+function fmtMin(m) { m = ((m % 1440) + 1440) % 1440; return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; }
+// сдвиг {from, min}: точки начиная с from идут позже, а точка перед ними длится дольше.
+// fixed (прилёт, прибытие поезда) сдвиг не переносит: дальше снова по плану.
+function times(day, idx) {
+  const it = day.items[idx];
+  const [s, e] = span(it);
+  let anchor = -1;
+  for (let j = idx; j >= 0; j--) if (day.items[j].fixed) { anchor = j; break; }
+  let d = 0, ext = 0;
+  delays(day.date).forEach(x => {
+    if (x.from < anchor) return;
+    if (idx >= x.from) d += x.min;
+    else if (idx === x.from - 1) ext += x.min;
+  });
+  const en = e + d + ext;
+  return { s: s + d, e: en, d: d + ext, t: fmtMin(s + d), en: it.e || ext ? fmtMin(en) : null };
+}
+// предупреждения по часам работы для сдвинутого времени
+function liveWarn(it, tm) {
+  if (!tm.d) return it.warn || [];
+  const w = [];
+  if (it.by) {
+    const b = toMin(it.by), what = it.byWhat || 'отправление';
+    if (tm.e > b) w.push(`${what} в ${it.by} — не успеваете`);
+    else if (tm.e > b - 10) w.push(`впритык: ${what} в ${it.by}`);
+  }
+  if (!it.h) return w.length ? w : (it.warn || []);
+  if (it.h.closed) return [...w, 'в этот день выходной'];
+  const o = toMin(it.h.o);
+  let c = toMin(it.h.c);
+  if (c <= o) c += 1440;
+  if (tm.e > c) w.push(`закрывается в ${it.h.c}`);
+  if (it.h.b) {
+    const [b0, b1] = it.h.b.split('-').map(toMin);
+    if (tm.s < b1 && tm.e > b0) w.push(`перерыв ${it.h.b.replace('-', '–')}`);
+  }
+  if (it.h.lo && /Обед|Ужин/.test(it.routine || '') && tm.s > toMin(it.h.lo) - 20) w.push(`последний заказ ${it.h.lo}`);
+  return w;
+}
+function leaveAt(it, tm) {
+  if (!it.leg || !it.leg.min || it.fixed) return null;
+  return tm.s - it.leg.min - (it.leg.kind === 'transit' ? 5 : 0);
+}
+
 function nextUp(day) {
   const now = kstNow();
   if (now.date !== day.date) return null;
   const items = day.items;
   for (let i = 0; i < items.length; i++) {
-    const [s, e] = span(items[i]);
-    if (now.min >= s && now.min < e) return { idx: i, it: items[i], now: true };
-    if (now.min < s) return { idx: i, it: items[i], now: false, wait: s - now.min };
+    const tm = times(day, i);
+    if (now.min >= tm.s && now.min < tm.e) return { idx: i, it: items[i], tm, now: true };
+    if (now.min < tm.s) return { idx: i, it: items[i], tm, now: false, wait: tm.s - now.min };
   }
   return null;
 }
@@ -251,17 +302,47 @@ function setTheme(theme, animate) {
 }
 
 function nextCard(day, nu) {
-  const it = nu.it;
+  const it = nu.it, tm = nu.tm, now = kstNow().min;
   const label = nu.now ? 'Сейчас' : `Далее · ${inMinutes(nu.wait)}`;
+  // когда выходить: к следующей точке (если идёт текущая — к той, что после неё)
+  let go = null, nextWarn = [];
+  const target = nu.now ? nu.idx + 1 : nu.idx;
+  if (target < day.items.length) {
+    const nit = day.items[target], ntm = times(day, target), at = leaveAt(nit, ntm);
+    if (nu.now) nextWarn = liveWarn(nit, ntm).filter(w => w.includes('не успеваете')).map(w => `${stopTitle(nit)}: ${w}`);
+    if (at != null) {
+      const late = at <= now;
+      const lead = nu.now ? `К «${stopTitle(nit)}» к ${ntm.t}: ` : '';
+      go = h('div', { class: 'go' + (late ? ' late' : '') }, icon(legIcon(nit.leg.kind)),
+        late ? `${lead}пора выходить · ${nit.leg.text}` : `${lead}выходите в ${fmtMin(at)} · ${nit.leg.text}`);
+    }
+  }
+  const warn = [...liveWarn(it, tm), ...nextWarn];
+  const shift = dayShift(day.date);
+  const tk = ticketsFor(it, day);
   return h('div', { class: 'card next' },
     h('button', { class: 'next-main', onClick: () => openSheet(day, nu.idx) },
       h('div', { class: 'label' }, label),
       h('div', { class: 't' }, stopTitle(it)),
       it.ko ? h('div', { class: 'k ko' }, it.ko) : null,
-      h('div', { class: 'meta' }, `${it.t}${it.e ? '–' + it.e : ''}`, !nu.now && it.leg ? ' · ' + it.leg.text : '')),
+      h('div', { class: 'meta' }, `${tm.t}${tm.en ? '–' + tm.en : ''}`, tm.d ? h('span', { class: 'shift' }, `+${tm.d}`) : null),
+      warn.length ? h('div', { class: 'chips' }, warn.map(w => h('span', { class: 'chip warn' }, w))) : null),
+    go,
     h('div', { class: 'actions' },
-      h('button', { class: 'btn primary', haptic: true, onClick: () => openTaxi(it) }, icon('taxi'), 'Таксисту'),
-      it.naver ? h('button', { class: 'btn', onClick: () => openNaver(it) }, 'Naver') : null));
+      tk ? h('button', { class: 'btn primary', haptic: true, onClick: () => openTickets(tk) }, icon('ticket'), 'Билеты') : null,
+      h('button', { class: 'btn' + (tk ? '' : ' primary'), haptic: true, onClick: () => openTaxi(it) }, icon('taxi'), 'Таксисту'),
+      it.naver ? h('button', { class: 'btn', onClick: () => openNaver(it) }, 'Naver') : null),
+    lateRow(day, nu.now ? nu.idx + 1 : nu.idx, tm.d ? `Опоздание +${tm.d} мин` : shift ? 'Дальше снова по плану' : 'Опаздываем?'));
+}
+
+function lateRow(day, from, text, after) {
+  const shift = dayShift(day.date);
+  const go = min => () => { addDelay(day.date, from, min); toast(`Дальше всё сдвинуто на ${min} мин`); if (after) after(); render(); };
+  return h('div', { class: 'late-row' },
+    h('span', { class: 'soft' }, text),
+    h('button', { class: 'mini', haptic: true, onClick: go(15) }, '+15'),
+    h('button', { class: 'mini', haptic: true, onClick: go(30) }, '+30'),
+    shift ? h('button', { class: 'mini', haptic: true, onClick: () => { resetDelay(day.date); if (after) after(); render(); } }, 'По плану') : null);
 }
 
 /* ---------- forecast ---------- */
@@ -311,11 +392,12 @@ function planList(it, day) {
 function stopRow(day, it, idx, now) {
   const done = isDone(day.date, idx);
   const clock = kstNow();
-  const past = !done && !now && (day.date < clock.date || (day.date === clock.date && span(it)[1] <= clock.min));
+  const past = !done && !now && (day.date < clock.date || (day.date === clock.date && times(day, idx).e <= clock.min));
   const ri = routineIcon(it);
   const plans = planList(it, day);
+  const tm = times(day, idx);
   const chips = [];
-  (it.warn || []).forEach(w => chips.push(h('span', { class: 'chip warn' }, w)));
+  liveWarn(it, tm).forEach(w => chips.push(h('span', { class: 'chip warn' }, w)));
   if (it.hours === 'выходной' && !(it.warn || []).some(w => w.includes('выходной'))) chips.push(h('span', { class: 'chip warn' }, 'выходной'));
   const sub = [it.ko, it.home ? null : it.district].filter(Boolean).join(' · ');
   const main = h('button', { class: 'body main' + (plans.length ? ' tagged' : ''), onClick: () => openSheet(day, idx) },
@@ -326,7 +408,7 @@ function stopRow(day, it, idx, now) {
     it.tnote ? h('div', { class: 'tnote' }, it.tnote) : null,
     chips.length ? h('div', { class: 'chips' }, chips) : null);
   return h('div', { class: 'stop' + (done ? ' done' : '') + (past ? ' past' : '') + (now ? ' now' : '') },
-    h('div', { class: 'time' }, it.t, it.e ? h('small', {}, it.e) : null),
+    h('div', { class: 'time' }, tm.t, tm.en ? h('small', {}, tm.en) : null, tm.d ? h('small', { class: 'shift' }, `+${tm.d}`) : null),
     h('div', { class: 'rail' }, h('span', { class: 'dot' })),
     plans.length
       ? h('div', { class: 'plans', 'data-key': `${day.date}:${idx}` }, main, plans.map(p => planPane(day, idx, it, p)))
@@ -358,9 +440,20 @@ function openSheet(day, idx) {
   if (it.planB && isRainy(it, day)) extra.push(sec(`Если дождь · ${rainProb(it.city, day.date)}%`, h('p', {}, cap(it.planB))));
   planList(it, day).filter(p => p.kind === 'alt').forEach(p => extra.push(sec(p.label, altCard(p.a, it, p.label))));
   if (it.diff && state.route === 'alt') extra.push(sec('Отличие от основного', h('p', { class: 'soft' }, it.diff)));
+  const tm = times(day, idx);
+  const tk = ticketsFor(it, day);
+  const bk = bookingFor(it, day);
+  if (bk && !tk) {
+    const dl = deadlineText(bk), bi = bookings().indexOf(bk);
+    extra.unshift(sec('Бронь', h('button', { class: 'booking', onClick: () => openBooking(bi) },
+      h('span', { class: 'st ' + (bk.status || 'todo') }, bk.status === 'done' ? icon('check') : bk.status === 'failed' ? icon('close') : null),
+      h('span', { class: 'bk-main' }, h('b', {}, bk.title), h('span', { class: 'soft' + (dl && dl.hot ? ' hot' : '') }, dl ? dl.text : STATUS[bk.status || 'todo'])))));
+  }
   showSheet(it, {
-    head: `${it.t}${it.e ? '–' + it.e : ''}${it.routine ? ' · ' + it.routine : ''}`,
-    extra,
+    head: `${tm.t}${tm.en ? '–' + tm.en : ''}${tm.d ? ` (+${tm.d})` : ''}${it.routine ? ' · ' + it.routine : ''}`,
+    warn: liveWarn(it, tm),
+    tickets: tk,
+    extra: [...extra, sec('Опаздываем', lateRow(day, idx, 'Сдвинуть эту и следующие точки'))],
     footer: close => h('div', { class: 'toggle-done' },
       h('button', {
         class: 'btn block',
@@ -395,7 +488,7 @@ function showSheet(it, opts) {
   const sections = [];
   if (it.what) sections.push(sec('Что делаем', h('p', {}, it.what)));
   const keep = [];
-  (it.warn || []).forEach(w => keep.push(h('div', { class: 'chips', style: 'margin-top:0' }, h('span', { class: 'chip warn' }, w))));
+  (opts.warn || it.warn || []).forEach(w => keep.push(h('div', { class: 'chips', style: 'margin-top:0' }, h('span', { class: 'chip warn' }, w))));
   if (it.hours) keep.push(h('p', {}, `Часы на этот день: ${it.hours}`));
   if (it.note) keep.push(h('p', {}, it.note));
   if (it.rating) keep.push(h('p', { class: 'soft' }, `Naver ★ ${it.rating}`));
@@ -411,8 +504,10 @@ function showSheet(it, opts) {
     it.ko ? h('div', { class: 'ko-big ko' }, it.ko) : null,
     road ? h('div', { class: 'addr ko' }, road) : null,
     it.home && !home.ko ? h('div', { class: 'addr' }, 'Адрес жилья добавьте во вкладке «Документы».') : null,
+    opts.tickets ? h('div', { class: 'actions' },
+      h('button', { class: 'btn primary block', haptic: true, onClick: () => openTickets(opts.tickets) }, icon('ticket'), 'Билеты · ' + opts.tickets.title)) : null,
     h('div', { class: 'actions' },
-      h('button', { class: 'btn primary block', haptic: true, onClick: () => openTaxi(it) }, icon('taxi'), 'Показать таксисту')),
+      h('button', { class: 'btn block' + (opts.tickets ? '' : ' primary'), haptic: true, onClick: () => openTaxi(it) }, icon('taxi'), 'Показать таксисту')),
     h('div', { class: 'row3' },
       it.naver ? h('button', { class: 'btn', onClick: () => openNaver(it) }, 'Naver') : null,
       it.google ? h('a', { class: 'btn', href: it.google, target: '_blank', rel: 'noopener' }, 'Google') : null,
@@ -539,7 +634,7 @@ function openOfficer() {
   const fmt = iso => { const d = new Date(iso + 'T00:00:00Z'); return `${d.getUTCDate()} Oct`; };
   const lines = [
     ['Purpose', 'Tourism (honeymoon)'],
-    ['Dates', '15 – 27 October 2026'],
+    ['Dates', '14 – 27 October 2026'],
     p.travelers ? ['Travelers', p.travelers] : null,
     p.keta && p.keta.number ? ['K-ETA', `approved · ${p.keta.number}`] : null,
     ...state.data.stays.map(s => [`${s.en}, ${fmt(s.from)} – ${fmt(s.to)}`, [homes[s.key] && homes[s.key].en, homes[s.key] && homes[s.key].ko].filter(Boolean).join(' / ') || '—']),
@@ -553,6 +648,75 @@ function openOfficer() {
     h('div', { class: 'close' }, 'Нажмите, чтобы закрыть'));
   box.onclick = () => closeTaxi(box);
   keepAwake(true);
+}
+
+/* ---------- bookings & tickets ---------- */
+function bookings() { return state.personal.bookings || []; }
+// бронь, относящаяся к точке маршрута: та же дата, совпадение названия и (если задано) время рядом
+function bookingFor(it, day, pred = () => true) {
+  return bookings().find(b => pred(b) && b.date === day.date && b.match && (it.title || '').includes(b.match)
+    && (!b.near || Math.abs(toMin(it.t) - toMin(b.near)) <= 40)) || null;
+}
+function ticketsFor(it, day) { return bookingFor(it, day, b => b.qr && b.qr.length); }
+function openTickets(b, k = 0) {
+  const box = document.getElementById('taxi');
+  const q = b.qr[k];
+  box.className = 'taxi ticket open';
+  fill(box,
+    h('div', { class: 'phrase' }, b.title),
+    b.qr.length > 1 ? h('div', { class: 'seg light' }, b.qr.map((x, j) => h('button', {
+      class: j === k ? 'sel' : '',
+      onClick: e => { e.stopPropagation(); openTickets(b, j); },
+    }, x.who))) : null,
+    h('div', { class: 'qr' }, h('img', { src: q.img, alt: 'QR' })),
+    h('div', { class: 'road' }, q.label),
+    (b.details || []).slice(0, 2).map(([k2, v]) => h('div', { class: 'en' }, `${k2}: ${v}`)),
+    h('div', { class: 'close' }, 'Нажмите, чтобы закрыть'));
+  box.onclick = () => closeTaxi(box);
+  keepAwake(true);
+}
+const STATUS = { done: 'готово', todo: 'надо сделать', failed: 'не вышло' };
+function deadlineText(b) {
+  if (b.status !== 'todo' || !b.deadline) return null;
+  const today = kstNow().date, d = b.deadline.slice(0, 10);
+  const n = daysBetween(today, d);
+  const when = `${d.slice(8, 10)}.${d.slice(5, 7)}${b.deadline.length > 10 ? ' ' + b.deadline.slice(11, 16) : ''}`;
+  const pre = b.due || 'до';
+  if (n < 0) return { text: `${pre} ${when} — срок прошёл`, hot: true };
+  if (n === 0) return { text: `${pre} сегодня${b.deadline.length > 10 ? ' в ' + b.deadline.slice(11, 16) : ''}`, hot: true };
+  return { text: `${pre} ${when} · через ${n} ${plural(n, 'день', 'дня', 'дней')}`, hot: n <= 3 };
+}
+function bookingRow(b, i) {
+  const dl = deadlineText(b);
+  return h('button', { class: 'booking', onClick: () => openBooking(i) },
+    h('span', { class: 'st ' + (b.status || 'todo') }, b.status === 'done' ? icon('check') : b.status === 'failed' ? icon('close') : null),
+    h('span', { class: 'bk-main' },
+      h('b', {}, b.title),
+      h('span', { class: 'soft' + (dl && dl.hot ? ' hot' : '') }, dl ? dl.text : STATUS[b.status || 'todo'])),
+    b.qr && b.qr.length ? icon('ticket') : null);
+}
+function openBooking(i) {
+  const b = bookings()[i];
+  const box = document.getElementById('sheet');
+  const close = () => { box.classList.add('closing'); setTimeout(() => { box.classList.remove('open', 'closing'); box.replaceChildren(); }, REDUCED ? 0 : 260); };
+  const setStatus = st => { b.status = st; store.set('personal', state.personal); close(); setTimeout(render, 240); };
+  const dl = deadlineText(b);
+  const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true' },
+    h('div', { class: 'grab' }),
+    h('div', { class: 'sheet-head' }, h('span', {}, STATUS[b.status || 'todo'] + (dl ? ' · ' + dl.text : '')),
+      h('button', { class: 'icon-btn', onClick: close, 'aria-label': 'Закрыть' }, icon('close'))),
+    h('h2', {}, b.title),
+    b.qr && b.qr.length ? h('div', { class: 'actions' }, h('button', { class: 'btn primary block', haptic: true, onClick: () => openTickets(b) }, icon('ticket'), 'Показать билеты')) : null,
+    b.link ? h('div', { class: 'actions' }, h('a', { class: 'btn block', href: b.link, target: '_blank', rel: 'noopener' }, icon('ext'), 'Открыть сайт')) : null,
+    (b.details || []).length ? sec('Детали', ...(b.details || []).map(([k, v]) => kv(k, v))) : null,
+    b.note ? sec('Заметка', h('p', {}, b.note)) : null,
+    h('div', { class: 'sec' }, h('h3', {}, 'Статус'), h('div', { class: 'seg' },
+      ['todo', 'done', 'failed'].map(st => h('button', { class: (b.status || 'todo') === st ? 'sel' : '', haptic: true, onClick: () => setStatus(st) }, STATUS[st])))));
+  fill(box, h('div', { class: 'backdrop', onClick: close }), sheet);
+  box.classList.remove('closing');
+  box.classList.add('open');
+  sheet.addEventListener('animationend', e => { if (e.target === sheet && !box.classList.contains('closing')) sheet.style.animation = 'none'; });
+  dragToDismiss(sheet, box.querySelector('.backdrop'), close);
 }
 
 /* ---------- documents ---------- */
@@ -601,6 +765,10 @@ function renderDocs(root) {
           kv('Путешественники', p.travelers),
           h('p', { class: 'soft', style: 'margin:12px 0 0' }, 'С действующей K-ETA e-Arrival Card не нужна. Паспорт тот же, что в заявке K-ETA.'),
           h('div', { class: 'actions' }, h('button', { class: 'btn primary block', onClick: openOfficer }, 'Показать пограничнику')))),
+      bookings().length ? h('div', { class: 'doc' }, h('h3', {}, 'Брони и билеты'),
+        h('div', { class: 'card list' }, [...bookings().map((b, i) => [b, i])]
+          .sort((x, y) => (x[0].status === 'todo' ? 0 : x[0].status === 'failed' ? 2 : 1) - (y[0].status === 'todo' ? 0 : y[0].status === 'failed' ? 2 : 1))
+          .map(([b, i]) => bookingRow(b, i)))) : null,
       h('div', { class: 'doc' }, h('h3', {}, 'Рейсы'),
         h('div', { class: 'card' }, kv('Туда', p.flights && p.flights.out), kv('Обратно', p.flights && p.flights.back))),
       h('div', { class: 'doc' }, h('h3', {}, 'Жильё'),

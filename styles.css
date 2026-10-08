@@ -272,3 +272,44 @@ svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-widt
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
+
+/* ---------- опаздываем · когда выходить ---------- */
+.go { display: flex; align-items: center; gap: 7px; margin-top: 12px; font-size: 14px; color: var(--accent); font-weight: 600; }
+.go svg.i { width: 16px; height: 16px; flex: none; }
+.go.late { color: var(--warn); }
+.late-row { display: flex; align-items: center; gap: 6px; margin-top: 12px; padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--accent) 18%, transparent); }
+.late-row .soft { flex: 1; font-size: 13px; }
+.sec .late-row { margin-top: 0; padding-top: 0; border-top: 0; }
+.mini { display: inline-flex; align-items: center; justify-content: center; height: 32px; padding: 0 12px; border-radius: 10px; background: var(--surface); color: var(--text); font-size: 14px; font-weight: 600; box-shadow: var(--shadow); }
+.sec .mini { background: var(--surface-2); box-shadow: none; }
+.mini:active { transform: scale(.94); transition: transform .09s var(--ease); }
+.shift { color: var(--warn); font-weight: 600; font-size: 12px; }
+.stop .time small.shift { color: var(--warn); font-weight: 600; }
+
+/* ---------- брони ---------- */
+.booking { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 0; border-top: 1px solid var(--line); text-align: left; color: var(--text); }
+.card > .booking:first-child, .sec .booking { border-top: 0; padding-top: 0; }
+.card > .booking:last-child, .sec .booking { padding-bottom: 0; }
+.booking > svg.i { width: 18px; height: 18px; color: var(--faint); flex: none; }
+.bk-main { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bk-main b { font-weight: 600; font-size: 15px; }
+.soft.hot { color: var(--warn); }
+.st { width: 22px; height: 22px; border-radius: 50%; flex: none; display: grid; place-items: center; border: 1.5px solid var(--faint); }
+.st svg.i { width: 14px; height: 14px; }
+.st.done { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.st.failed { background: var(--surface-2); border-color: var(--line); color: var(--muted); }
+.st.todo { border-color: var(--warn); }
+
+/* ---------- билет (QR) ---------- */
+.taxi.ticket { align-items: center; text-align: center; background: #fff; }
+.taxi.ticket .phrase { font-size: 19px; color: #333; font-weight: 600; }
+.taxi.ticket .qr { margin-top: 22px; width: min(78vw, 340px); aspect-ratio: 1; background: #fff; }
+.taxi.ticket .qr img { width: 100%; height: 100%; image-rendering: pixelated; display: block; }
+.taxi.ticket .road { font-size: 22px; margin-top: 16px; }
+.taxi.ticket .en { margin-top: 8px; }
+.taxi.ticket .en:first-of-type { margin-top: 18px; }
+.seg.light { background: #f0ede8; margin-top: 16px; width: min(78vw, 340px); }
+.seg.light > * { color: #666; }
+.seg.light > .sel { background: #fff; color: #111; }
+.next .actions { gap: 6px; }
+.next .actions .btn { padding: 0 13px; }
