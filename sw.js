@@ -1,4 +1,4 @@
-const VERSION = 'e4281b0dd3e9';
+const VERSION = '3a6b1bf3419b';
 const CACHE = 'trip-' + VERSION;
 const ASSETS = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'data/trip.enc.json',
   'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];

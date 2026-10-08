@@ -788,6 +788,7 @@ function renderDocs(root) {
         h('div', { class: 'card list' }, [...bookings().map((b, i) => [b, i])]
           .sort((x, y) => (x[0].status === 'todo' ? 0 : x[0].status === 'failed' ? 2 : 1) - (y[0].status === 'todo' ? 0 : y[0].status === 'failed' ? 2 : 1))
           .map(([b, i]) => bookingRow(b, i)))) : null,
+      p.insurance ? insuranceCard(p.insurance) : null,
       h('div', { class: 'doc' }, h('h3', {}, 'Рейсы'),
         h('div', { class: 'card' }, kv('Туда', p.flights && p.flights.out), kv('Обратно', p.flights && p.flights.back))),
       h('div', { class: 'doc' }, h('h3', {}, 'Жильё'),
@@ -808,7 +809,8 @@ function renderDocs(root) {
         h('div', { class: 'card' },
           callRow('Полиция', '112'), callRow('Скорая и пожарные', '119'),
           callRow('Туристическая линия (англ., рус.)', '1330'), callRow('Иммиграционная служба', '1345'),
-          p.embassy ? callRow('Посольство', p.embassy) : null)),
+          p.embassy ? callRow('Посольство', p.embassy) : null,
+          p.insurance && p.insurance.phone ? callRow('Страховая · врач в поездке', p.insurance.phone) : null)),
       p.notes ? h('div', { class: 'doc' }, h('h3', {}, 'Заметки'), h('div', { class: 'card' }, h('p', { style: 'margin:0;white-space:pre-wrap' }, p.notes))) : null);
   }
 
@@ -841,6 +843,32 @@ function forecastLabel() {
   }
   const f = state.data.forecast;
   return f ? `от ${f.issued.slice(8, 10)}.${f.issued.slice(5, 7)}` : 'нет';
+}
+
+/* ---------- страховка ---------- */
+function insuranceCard(ins) {
+  return h('div', { class: 'doc' }, h('h3', {}, 'Страховка'),
+    h('div', { class: 'card' },
+      kv('Полис', [ins.policy, ins.company].filter(Boolean).join(' · ')),
+      kv('Действует', ins.period),
+      kv('Покрытие', ins.sum),
+      ins.territory ? kv('Где', ins.territory) : null,
+      ins.howto ? h('p', { class: 'soft', style: 'margin:12px 0 0' }, ins.howto) : null,
+      h('div', { class: 'actions' },
+        ins.phone ? h('a', { class: 'btn primary', href: 'tel:' + ins.phone.replace(/[^\d+]/g, '') }, icon('phone'), 'Позвонить') : null,
+        ins.clinic ? h('button', { class: 'btn', haptic: true, onClick: () => openClinic(ins) }, 'Показать врачу') : null),
+      ins.excludes ? h('details', { class: 'more' }, h('summary', {}, 'Что не покрывается'), h('p', { class: 'soft' }, ins.excludes)) : null));
+}
+function openClinic(ins) {
+  const box = document.getElementById('taxi');
+  box.className = 'taxi officer open';
+  fill(box,
+    h('div', { class: 'phrase ko' }, '여행자 보험에 가입되어 있습니다'),
+    h('div', { class: 'en', style: 'margin-top:6px' }, 'I have travel medical insurance'),
+    ...ins.clinic.map(([k, v]) => h('div', {}, h('div', { class: 'en', style: 'margin-top:16px' }, k), h('div', { class: 'road', style: 'margin-top:2px;white-space:pre-line' }, v))),
+    h('div', { class: 'close' }, 'Нажмите, чтобы закрыть'));
+  box.onclick = () => closeTaxi(box);
+  keepAwake(true);
 }
 
 function callRow(label, num) {
