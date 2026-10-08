@@ -330,3 +330,32 @@ details.more { margin-top: 12px; }
 details.more summary { font-size: 14px; color: var(--accent); font-weight: 600; cursor: pointer; list-style: none; }
 details.more summary::-webkit-details-marker { display: none; }
 details.more p { margin: 8px 0 0; }
+
+/* ---------- маршруты: оригинальный · обновлённый · авторский ---------- */
+:root { --claude: #c96442; --claude-weak: #f6e4dc; }
+:root[data-theme="dark"] { --claude: #e08a68; --claude-weak: #3a271f; }
+.route-pill { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; padding: 4px 8px 4px 10px; border-radius: 999px;
+  background: var(--surface-2); color: var(--muted); font-size: 13px; font-weight: 600; }
+.route-pill svg.i { width: 14px; height: 14px; }
+.route-pill.claude { background: var(--claude-weak); color: var(--claude); }
+.route-pill:active { transform: scale(.96); transition: transform .09s var(--ease); }
+.seg > .claude { color: var(--claude); display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+.seg > .claude.sel { background: var(--claude); color: #fff; }
+.seg > .claude svg.i { width: 13px; height: 13px; }
+.route-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.route-opt { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 10px; width: 100%; text-align: left;
+  padding: 14px 16px; border-radius: 16px; background: var(--surface); box-shadow: var(--shadow); color: var(--text); }
+.route-opt .ro-name { display: inline-flex; align-items: center; gap: 6px; font-weight: 650; font-size: 16px; }
+.route-opt .soft { grid-column: 1; font-size: 13px; }
+.route-opt > svg.i { grid-row: 1 / span 2; grid-column: 2; width: 20px; height: 20px; color: var(--accent); }
+.route-opt.sel { outline: 2px solid var(--accent); }
+.route-opt.claude .ro-name { color: var(--claude); }
+.route-opt.claude.sel { outline-color: var(--claude); }
+.route-opt.claude > svg.i { color: var(--claude); }
+.route-opt svg.i { width: 15px; height: 15px; }
+
+/* ---------- K-ETA ---------- */
+.keta + .keta { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.keta-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.keta-head b { font-weight: 600; }
+.keta .kv:first-of-type { border-top: 0; }

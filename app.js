@@ -8,7 +8,7 @@ const store = {
 
 const state = {
   data: null,
-  route: store.get('route', 'alt'),
+  route: store.get('routeV', 0) === 3 ? store.get('route', 'main') : (store.set('routeV', 3), store.set('route', 'main'), 'main'),
   tab: 'route',
   date: null,
   personal: store.get('personal', {}),
@@ -77,6 +77,8 @@ const ICONS = {
   share: '<path d="M12 3v12M8 7l4-4 4 4"/><path d="M6 12v7a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-7"/>',
   phone: '<path d="M5 4h3l2 5-2.5 1.5a11 11 0 0 0 6 6L15 14l5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>',
+  spark: '<path d="M12 3.5v17M3.5 12h17M6 6l12 12M18 6L6 18"/>',
+  chevron: '<path d="M7 10l5 5 5-5"/>',
   ticket: '<path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z"/><path d="M14 5v12"/>',
   umbrella: '<path d="M3 12a9 9 0 0 1 18 0z"/><path d="M12 12v6.5a2 2 0 0 1-4 0M12 3v0"/>',
 };
@@ -119,7 +121,40 @@ function inMinutes(n) {
 }
 
 /* ---------- data ---------- */
-function days() { return state.data.routes[state.route] || state.data.routes.alt; }
+const ROUTES = [['orig', 'Оригинальный', 'как вы составили до ревизии'], ['main', 'Обновлённый', 'ваш маршрут с принятыми правками'], ['alt', 'Авторский', 'вариант Claude «10 из 10»']];
+function days() { return state.data.routes[state.route] || state.data.routes.main; }
+function routeName(k = state.route) { return (ROUTES.find(r => r[0] === k) || ROUTES[1])[1]; }
+function setRoute(k) { state.route = k; store.set('route', k); render(); }
+function routeButtons(onPick) {
+  return ROUTES.filter(([k]) => state.data.routes[k]).map(([k, name]) => h('button', {
+    class: (state.route === k ? 'sel' : '') + (k === 'alt' ? ' claude' : ''),
+    haptic: true,
+    onClick: () => onPick(k),
+  }, k === 'alt' ? icon('spark') : null, name));
+}
+function routePill() {
+  return h('button', { class: 'route-pill' + (state.route === 'alt' ? ' claude' : ''), haptic: true, onClick: openRouteSheet },
+    state.route === 'alt' ? icon('spark') : null, routeName(), icon('chevron'));
+}
+function openRouteSheet() {
+  const box = document.getElementById('sheet');
+  const close = () => { box.classList.add('closing'); setTimeout(() => { box.classList.remove('open', 'closing'); box.replaceChildren(); }, REDUCED ? 0 : 260); };
+  const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true' },
+    h('div', { class: 'grab' }),
+    h('div', { class: 'sheet-head' }, h('span', {}, 'Какой маршрут показывать'),
+      h('button', { class: 'icon-btn', onClick: close, 'aria-label': 'Закрыть' }, icon('close'))),
+    h('div', { class: 'route-list' }, ROUTES.filter(([k]) => state.data.routes[k]).map(([k, name, about]) => h('button', {
+      class: 'route-opt' + (state.route === k ? ' sel' : '') + (k === 'alt' ? ' claude' : ''),
+      haptic: true,
+      onClick: () => { close(); setTimeout(() => setRoute(k), 200); },
+    }, h('span', { class: 'ro-name' }, k === 'alt' ? icon('spark') : null, name), h('span', { class: 'soft' }, about),
+      state.route === k ? icon('check') : null))));
+  fill(box, h('div', { class: 'backdrop', onClick: close }), sheet);
+  box.classList.remove('closing');
+  box.classList.add('open');
+  sheet.addEventListener('animationend', e => { if (e.target === sheet && !box.classList.contains('closing')) sheet.style.animation = 'none'; });
+  dragToDismiss(sheet, box.querySelector('.backdrop'), close);
+}
 function currentDay() { return days().find(d => d.date === state.date) || days()[0]; }
 function doneKey(date, idx) { return `done:${state.route}:${date}:${idx}`; }
 function isDone(date, idx) { return store.get(doneKey(date, idx), false); }
@@ -222,7 +257,8 @@ function renderRoute(root) {
     h('div', { class: 'top-row' },
       h('div', {},
         h('h1', { class: 'day-title' }, longDate(day.date)),
-        h('div', { class: 'day-sub' }, [day.city, day.title].filter(Boolean).join(' · '), rainPill(day))),
+        h('div', { class: 'day-sub' }, [day.city, day.title].filter(Boolean).join(' · '), rainPill(day)),
+        routePill()),
       sunToggle(day)),
     h('div', { class: 'days', id: 'days' },
       list.map(d => {
@@ -439,7 +475,7 @@ function openSheet(day, idx) {
   const extra = [];
   if (it.planB && isRainy(it, day)) extra.push(sec(`Если дождь · ${rainProb(it.city, day.date)}%`, h('p', {}, cap(it.planB))));
   planList(it, day).filter(p => p.kind === 'alt').forEach(p => extra.push(sec(p.label, altCard(p.a, it, p.label))));
-  if (it.diff && state.route === 'alt') extra.push(sec('Отличие от основного', h('p', { class: 'soft' }, it.diff)));
+  if (it.diff && state.route === 'alt') extra.push(sec('Отличие от оригинала', h('p', { class: 'soft' }, it.diff)));
   const tm = times(day, idx);
   const tk = ticketsFor(it, day);
   const bk = bookingFor(it, day);
@@ -651,7 +687,8 @@ function openOfficer() {
     ['Purpose', 'Tourism (honeymoon)'],
     ['Dates', '14 – 27 October 2026'],
     p.travelers ? ['Travelers', p.travelers] : null,
-    p.keta && p.keta.number ? ['K-ETA', `approved · ${p.keta.number}`] : null,
+    ...(p.ketas && p.ketas.length ? p.ketas.map(k => [`K-ETA · ${k.en || k.who}`, `approved · ${k.number}`])
+      : [p.keta && p.keta.number ? ['K-ETA', `approved · ${p.keta.number}`] : null]),
     ...state.data.stays.map(s => [`${s.en}, ${fmt(s.from)} – ${fmt(s.to)}`, [homes[s.key] && homes[s.key].en, homes[s.key] && homes[s.key].ko].filter(Boolean).join(' / ') || '—']),
     p.flights && p.flights.back ? ['Return flight', p.flights.back] : null,
     p.flights && p.flights.out ? ['Arrival flight', p.flights.out] : null,
@@ -771,7 +808,7 @@ function renderDocs(root) {
   const wrap = h('div', { class: 'wrap' });
 
   if (state.editing) {
-    const form = h('div', { class: 'card' }, FIELDS.map(([path, label, ph]) =>
+    const form = h('div', { class: 'card' }, FIELDS.filter(([path]) => !(p.ketas && /^keta\./.test(path))).map(([path, label, ph]) =>
       h('label', { class: 'field' }, h('span', {}, label),
         h('input', { value: getPath(p, path), placeholder: ph, autocomplete: 'off', onInput: e => { setPath(p, path, e.target.value.trim()); store.set('personal', p); } }))));
     add(wrap, h('div', { class: 'doc' }, form));
@@ -779,9 +816,11 @@ function renderDocs(root) {
     add(wrap, 
       h('div', { class: 'doc' }, h('h3', {}, 'Граница'),
         h('div', { class: 'card' },
-          kv('K-ETA', p.keta && p.keta.number ? `одобрена · ${p.keta.number}` : ''),
-          kv('Действует до', p.keta && p.keta.valid),
-          kv('Путешественники', p.travelers),
+          ...(p.ketas && p.ketas.length
+            ? p.ketas.map(k => h('div', { class: 'keta' },
+              h('div', { class: 'keta-head' }, h('b', {}, k.who), h('span', { class: 'chip ok' }, 'K-ETA одобрена')),
+              kv('Номер', k.number), kv('Действует до', k.valid), kv('Паспорт', k.passport)))
+            : [kv('K-ETA', p.keta && p.keta.number ? `одобрена · ${p.keta.number}` : ''), kv('Действует до', p.keta && p.keta.valid), kv('Путешественники', p.travelers)]),
           h('p', { class: 'soft', style: 'margin:12px 0 0' }, 'С действующей K-ETA e-Arrival Card не нужна. Паспорт тот же, что в заявке K-ETA.'),
           h('div', { class: 'actions' }, h('button', { class: 'btn primary block', onClick: openOfficer }, 'Показать пограничнику')))),
       bookings().length ? h('div', { class: 'doc' }, h('h3', {}, 'Брони и билеты'),
@@ -810,6 +849,7 @@ function renderDocs(root) {
           callRow('Полиция', '112'), callRow('Скорая и пожарные', '119'),
           callRow('Туристическая линия (англ., рус.)', '1330'), callRow('Иммиграционная служба', '1345'),
           p.embassy ? callRow('Посольство', p.embassy) : null,
+          ...(p.embassies || []).map(e => callRow(e.label, e.phone)),
           p.insurance && p.insurance.phone ? callRow('Страховая · врач в поездке', p.insurance.phone) : null)),
       p.notes ? h('div', { class: 'doc' }, h('h3', {}, 'Заметки'), h('div', { class: 'card' }, h('p', { style: 'margin:0;white-space:pre-wrap' }, p.notes))) : null);
   }
@@ -818,11 +858,7 @@ function renderDocs(root) {
     h('div', { class: 'card' },
       h('div', { class: 'soft', style: 'margin-bottom:8px' }, 'Маршрут'),
       h('div', { class: 'seg' },
-        ['alt', 'main'].map(k => h('button', {
-          class: state.route === k ? 'sel' : '',
-          haptic: true,
-          onClick: () => { state.route = k; store.set('route', k); render(); },
-        }, k === 'alt' ? '10 из 10' : 'Основной'))),
+        routeButtons(setRoute)),
       h('div', { class: 'kv', style: 'margin-top:12px' }, h('span', { class: 'k' }, 'Без интернета'), h('span', { class: 'v', id: 'offline-status' }, '…')),
       h('div', { class: 'kv' }, h('span', { class: 'k' }, 'Версия приложения'), h('span', { class: 'v', id: 'app-version' }, '…')),
       h('div', { class: 'kv' }, h('span', { class: 'k' }, 'Данные от'), h('span', { class: 'v' }, state.data.version)),
