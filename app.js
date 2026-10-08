@@ -581,8 +581,9 @@ function naverAppUrl(it) {
 }
 // ссылки на карты для точки; у «Дома» — по адресу из личных данных
 function linksOf(it) {
-  if (!it.home) return it;
-  const hm = homeOf(it.home), q = hm.ko || hm.en;
+  const key = it.home || it.taxiHome;
+  if (!key) return it;
+  const hm = homeOf(key), q = hm.ko || hm.en;
   if (!q) return {};
   return {
     ko: hm.ko,
@@ -619,11 +620,12 @@ async function keepAwake(on) {
 function openTaxi(it) {
   const box = document.getElementById('taxi');
   let name = it.ko || it.title, road = it.road || '', en = it.title;
-  if (it.home) {
-    const hm = homeOf(it.home);
+  const hk = it.home || it.taxiHome; // taxiHome: поездка, которая заканчивается дома
+  if (hk) {
+    const hm = homeOf(hk);
     name = hm.ko || 'Адрес не заполнен';
     road = hm.phone ? `☎ ${hm.phone}` : '';
-    en = hm.en || (it.home === 'seoul' ? 'Home · Seoul' : 'Home · Busan');
+    en = hm.en || (hk === 'seoul' ? 'Home · Seoul' : 'Home · Busan');
   }
   box.className = 'taxi open';
   fill(box,
@@ -820,6 +822,7 @@ function renderDocs(root) {
           onClick: () => { state.route = k; store.set('route', k); render(); },
         }, k === 'alt' ? '10 из 10' : 'Основной'))),
       h('div', { class: 'kv', style: 'margin-top:12px' }, h('span', { class: 'k' }, 'Без интернета'), h('span', { class: 'v', id: 'offline-status' }, '…')),
+      h('div', { class: 'kv' }, h('span', { class: 'k' }, 'Версия приложения'), h('span', { class: 'v', id: 'app-version' }, '…')),
       h('div', { class: 'kv' }, h('span', { class: 'k' }, 'Данные от'), h('span', { class: 'v' }, state.data.version)),
       h('div', { class: 'kv' }, h('span', { class: 'k' }, 'Прогноз дождя'), h('span', { class: 'v' }, forecastLabel())),
       h('div', { class: 'row2' },
@@ -848,7 +851,14 @@ async function offlineStatus() {
   const el = document.getElementById('offline-status');
   if (!el) return;
   let ok = false;
-  try { ok = !!(navigator.serviceWorker && navigator.serviceWorker.controller) && (await caches.keys()).some(k => k.startsWith('trip-')); } catch (e) { ok = false; }
+  let ver = '';
+  try {
+    const keys = (await caches.keys()).filter(k => k.startsWith('trip-'));
+    ok = !!(navigator.serviceWorker && navigator.serviceWorker.controller) && keys.length > 0;
+    ver = keys.map(k => k.slice(5, 12)).join(', ');
+  } catch (e) { ok = false; }
+  const v = document.getElementById('app-version');
+  if (v) v.textContent = ver || '—';
   el.textContent = ok ? 'готово' : 'откройте один раз с интернетом';
 }
 async function exportPersonal() {
@@ -1043,7 +1053,16 @@ async function main() {
   }, { passive: true });
   refreshForecast();
   window.addEventListener('online', refreshForecast);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) { refreshForecast(); if (state.tab === 'route') render(); } });
+  let checked = Date.now();
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    refreshForecast();
+    if (state.tab === 'route') render();
+    if (navigator.serviceWorker && Date.now() - checked > 5 * 60e3) {
+      checked = Date.now();
+      navigator.serviceWorker.getRegistration().then(r => r && r.update()).catch(() => {});
+    }
+  });
   setInterval(() => { if (!document.hidden && state.tab === 'route' && !document.querySelector('.overlay.open, .taxi.open')) render(); }, 60e3);
 }
 main();
