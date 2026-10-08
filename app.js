@@ -206,7 +206,9 @@ function liveWarn(it, tm) {
     const [b0, b1] = it.h.b.split('-').map(toMin);
     if (tm.s < b1 && tm.e > b0) w.push(`перерыв ${it.h.b.replace('-', '–')}`);
   }
-  if (it.h.lo && /Обед|Ужин/.test(it.routine || '') && tm.s > toMin(it.h.lo) - 20) w.push(`последний заказ ${it.h.lo}`);
+  let lo = it.h.lo ? toMin(it.h.lo) : null;
+  if (lo != null && lo <= o) lo += 1440; // последний заказ после полуночи
+  if (lo != null && /Обед|Ужин/.test(it.routine || '') && tm.s > lo - 20) w.push(`последний заказ ${it.h.lo}`);
   return w;
 }
 function leaveAt(it, tm) {
@@ -840,7 +842,7 @@ function renderDocs(root) {
       h('div', { class: 'doc' }, h('h3', {}, 'Экстренные номера'),
         h('div', { class: 'card' },
           callRow('Полиция', '112'), callRow('Скорая и пожарные', '119'),
-          callRow('Туристическая линия (англ., рус.)', '1330'), callRow('Иммиграционная служба', '1345'),
+          callRow('Туристическая линия · англ. круглосуточно, рус. 08:00–19:00', '1330'), callRow('Иммиграционная служба', '1345'),
           p.embassy ? callRow('Посольство', p.embassy) : null,
           ...(p.embassies || []).map(e => callRow(e.label, e.phone)),
           p.insurance && p.insurance.phone ? callRow('Страховая · врач в поездке', p.insurance.phone) : null)),
