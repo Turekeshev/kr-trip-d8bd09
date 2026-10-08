@@ -331,7 +331,7 @@ function nextCard(day, nu) {
     h('div', { class: 'actions' },
       tk ? h('button', { class: 'btn primary', haptic: true, onClick: () => openTickets(tk) }, icon('ticket'), 'Билеты') : null,
       h('button', { class: 'btn' + (tk ? '' : ' primary'), haptic: true, onClick: () => openTaxi(it) }, icon('taxi'), 'Таксисту'),
-      it.naver ? h('button', { class: 'btn', onClick: () => openNaver(it) }, 'Naver') : null),
+      linksOf(it).naver ? h('button', { class: 'btn', onClick: () => openNaver(it) }, 'Naver') : null),
     lateRow(day, nu.now ? nu.idx + 1 : nu.idx, tm.d ? `Опоздание +${tm.d} мин` : shift ? 'Дальше снова по плану' : 'Опаздываем?'));
 }
 
@@ -509,8 +509,8 @@ function showSheet(it, opts) {
     h('div', { class: 'actions' },
       h('button', { class: 'btn block' + (opts.tickets ? '' : ' primary'), haptic: true, onClick: () => openTaxi(it) }, icon('taxi'), 'Показать таксисту')),
     h('div', { class: 'row3' },
-      it.naver ? h('button', { class: 'btn', onClick: () => openNaver(it) }, 'Naver') : null,
-      it.google ? h('a', { class: 'btn', href: it.google, target: '_blank', rel: 'noopener' }, 'Google') : null,
+      linksOf(it).naver ? h('button', { class: 'btn', onClick: () => openNaver(it) }, 'Naver') : null,
+      linksOf(it).google ? h('a', { class: 'btn', href: linksOf(it).google, target: '_blank', rel: 'noopener' }, 'Google') : null,
       (it.ko || road) ? h('button', { class: 'btn', onClick: () => copy([it.ko, road].filter(Boolean).join('\n')) }, icon('copy'), 'Адрес') : null),
     sections,
     opts.extra || [],
@@ -527,7 +527,7 @@ function showSheet(it, opts) {
 function dragToDismiss(sheet, backdrop, close) {
   let y0 = null, t0 = 0, dy = 0;
   sheet.addEventListener('touchstart', e => {
-    if (sheet.scrollTop > 0) { y0 = null; return; }
+    if (sheet.scrollTop > 0 || e.target.closest('textarea, input')) { y0 = null; return; }
     y0 = e.touches[0].clientY; t0 = Date.now(); dy = 0;
     sheet.style.transition = 'none';
   }, { passive: true });
@@ -579,7 +579,19 @@ function naverAppUrl(it) {
   const query = q ? decodeURIComponent(q[1]) : (it.ko || '');
   return query ? `nmap://search?query=${encodeURIComponent(query)}&appname=${NMAP_APPNAME}` : null;
 }
+// ссылки на карты для точки; у «Дома» — по адресу из личных данных
+function linksOf(it) {
+  if (!it.home) return it;
+  const hm = homeOf(it.home), q = hm.ko || hm.en;
+  if (!q) return {};
+  return {
+    ko: hm.ko,
+    naver: 'https://map.naver.com/p/search/' + encodeURIComponent(q),
+    google: 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(q),
+  };
+}
 function openNaver(it) {
+  it = linksOf(it);
   const app = naverAppUrl(it);
   if (!app) { window.open(it.naver, '_blank', 'noopener'); return; }
   let left = false;
@@ -618,7 +630,8 @@ function openTaxi(it) {
     h('div', { class: 'phrase ko' }, '이 주소로 가 주세요'),
     h('div', { class: 'name ko' }, name),
     road ? h('div', { class: 'road ko' }, road) : null,
-    h('div', { class: 'en' }, en, ' · Please take me to this address'),
+    h('div', { class: 'nav ko' }, '네이버 지도 경로대로 가 주시면 감사하겠습니다 🙂'),
+    h('div', { class: 'en' }, en, ' · Please take me to this address. We’ll follow along on Naver Map — thank you!'),
     h('div', { class: 'close' }, 'Нажмите, чтобы закрыть'));
   box.onclick = () => closeTaxi(box);
   keepAwake(true);
@@ -709,7 +722,11 @@ function openBooking(i) {
     b.qr && b.qr.length ? h('div', { class: 'actions' }, h('button', { class: 'btn primary block', haptic: true, onClick: () => openTickets(b) }, icon('ticket'), 'Показать билеты')) : null,
     b.link ? h('div', { class: 'actions' }, h('a', { class: 'btn block', href: b.link, target: '_blank', rel: 'noopener' }, icon('ext'), 'Открыть сайт')) : null,
     (b.details || []).length ? sec('Детали', ...(b.details || []).map(([k, v]) => kv(k, v))) : null,
-    b.note ? sec('Заметка', h('p', {}, b.note)) : null,
+    h('div', { class: 'sec' }, h('h3', {}, 'Заметка'), h('label', { class: 'field' },
+      h('textarea', {
+        class: 'memo', rows: 3, placeholder: 'Например, код от двери или номер брони',
+        onInput: e => { b.memo = e.target.value; store.set('personal', state.personal); },
+      }, b.memo != null ? b.memo : (b.note || '')))),
     h('div', { class: 'sec' }, h('h3', {}, 'Статус'), h('div', { class: 'seg' },
       ['todo', 'done', 'failed'].map(st => h('button', { class: (b.status || 'todo') === st ? 'sel' : '', haptic: true, onClick: () => setStatus(st) }, STATUS[st])))));
   fill(box, h('div', { class: 'backdrop', onClick: close }), sheet);
@@ -774,9 +791,16 @@ function renderDocs(root) {
       h('div', { class: 'doc' }, h('h3', {}, 'Жильё'),
         h('div', { class: 'card' }, state.data.stays.map(s => {
           const hm = homeOf(s.key);
-          return h('div', { class: 'call' },
-            h('div', {}, h('b', {}, s.city), h('div', { class: 'soft ko' }, hm.ko || 'адрес не заполнен'), hm.phone ? h('div', { class: 'soft' }, hm.phone) : null),
-            h('button', { class: 'btn', onClick: () => openTaxi({ home: s.key, title: s.city }) }, icon('taxi')));
+          const home = { home: s.key, title: s.city }, lk = linksOf(home);
+          return h('div', { class: 'home-row' },
+            h('b', {}, s.city),
+            h('div', { class: 'soft ko' }, hm.ko || 'адрес не заполнен'),
+            hm.en ? h('div', { class: 'soft' }, hm.en) : null,
+            hm.phone ? h('a', { class: 'tel', href: 'tel:' + hm.phone.replace(/[^\d+]/g, '') }, icon('phone'), hm.phone) : null,
+            h('div', { class: 'actions' },
+              h('button', { class: 'btn primary', haptic: true, onClick: () => openTaxi(home) }, icon('taxi'), 'Таксисту'),
+              lk.naver ? h('button', { class: 'btn', onClick: () => openNaver(home) }, 'Naver') : null,
+              lk.google ? h('a', { class: 'btn', href: lk.google, target: '_blank', rel: 'noopener' }, 'Google') : null));
         }))),
       h('div', { class: 'doc' }, h('h3', {}, 'Экстренные номера'),
         h('div', { class: 'card' },
@@ -841,11 +865,23 @@ function importPersonal(e) {
   if (!f) return;
   f.text().then(t => {
     const obj = JSON.parse(t);
+    if (Array.isArray(obj.bookings)) obj.bookings = mergeBookings(state.personal.bookings, obj.bookings);
     state.personal = deepMerge(state.personal, obj);
     store.set('personal', state.personal);
     toast('Данные загружены');
     render();
   }).catch(() => toast('Не удалось прочитать файл'));
+}
+function mergeBookings(local = [], incoming = []) {
+  const old = new Map(local.map(b => [b.id, b]));
+  return incoming.map(b => {
+    const o = old.get(b.id);
+    if (!o) return b;
+    const out = { ...b };
+    if (o.memo != null) out.memo = o.memo;
+    if (o.status && o.status !== 'todo' && (b.status || 'todo') === 'todo') out.status = o.status;
+    return out;
+  });
 }
 function deepMerge(a, b) {
   const out = { ...a };
