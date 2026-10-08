@@ -125,13 +125,6 @@ const ROUTES = [['orig', 'Оригинальный', 'как вы состави
 function days() { return state.data.routes[state.route] || state.data.routes.main; }
 function routeName(k = state.route) { return (ROUTES.find(r => r[0] === k) || ROUTES[1])[1]; }
 function setRoute(k) { state.route = k; store.set('route', k); render(); }
-function routeButtons(onPick) {
-  return ROUTES.filter(([k]) => state.data.routes[k]).map(([k, name]) => h('button', {
-    class: (state.route === k ? 'sel' : '') + (k === 'alt' ? ' claude' : ''),
-    haptic: true,
-    onClick: () => onPick(k),
-  }, k === 'alt' ? icon('spark') : null, name));
-}
 function routePill() {
   return h('button', { class: 'route-pill' + (state.route === 'alt' ? ' claude' : ''), haptic: true, onClick: openRouteSheet },
     state.route === 'alt' ? icon('spark') : null, routeName(), icon('chevron'));
@@ -541,7 +534,7 @@ function showSheet(it, opts) {
     road ? h('div', { class: 'addr ko' }, road) : null,
     it.home && !home.ko ? h('div', { class: 'addr' }, 'Адрес жилья добавьте во вкладке «Документы».') : null,
     opts.tickets ? h('div', { class: 'actions' },
-      h('button', { class: 'btn primary block', haptic: true, onClick: () => openTickets(opts.tickets) }, icon('ticket'), 'Билеты · ' + opts.tickets.title)) : null,
+      h('button', { class: 'btn primary block', haptic: true, onClick: () => openTickets(opts.tickets) }, icon('ticket'), 'Билеты · ' + opts.tickets.title.split(' · ')[0])) : null,
     h('div', { class: 'actions' },
       h('button', { class: 'btn block' + (opts.tickets ? '' : ' primary'), haptic: true, onClick: () => openTaxi(it) }, icon('taxi'), 'Показать таксисту')),
     h('div', { class: 'row3' },
@@ -856,10 +849,10 @@ function renderDocs(root) {
 
   add(wrap, h('div', { class: 'doc' }, h('h3', {}, 'Настройки'),
     h('div', { class: 'card' },
-      h('div', { class: 'soft', style: 'margin-bottom:8px' }, 'Маршрут'),
-      h('div', { class: 'seg' },
-        routeButtons(setRoute)),
-      h('div', { class: 'kv', style: 'margin-top:12px' }, h('span', { class: 'k' }, 'Без интернета'), h('span', { class: 'v', id: 'offline-status' }, '…')),
+      h('button', { class: 'kv-btn', haptic: true, onClick: openRouteSheet },
+        h('span', { class: 'k' }, 'Маршрут'),
+        h('span', { class: 'v' + (state.route === 'alt' ? ' claude' : '') }, state.route === 'alt' ? icon('spark') : null, routeName(), icon('chevron'))),
+      h('div', { class: 'kv' }, h('span', { class: 'k' }, 'Без интернета'), h('span', { class: 'v', id: 'offline-status' }, '…')),
       h('div', { class: 'kv' }, h('span', { class: 'k' }, 'Версия приложения'), h('span', { class: 'v', id: 'app-version' }, '…')),
       h('div', { class: 'kv' }, h('span', { class: 'k' }, 'Данные от'), h('span', { class: 'v' }, state.data.version)),
       h('div', { class: 'kv' }, h('span', { class: 'k' }, 'Прогноз дождя'), h('span', { class: 'v' }, forecastLabel())),

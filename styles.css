@@ -188,7 +188,7 @@ svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-widt
   border-radius: 12px; padding: 10px 12px; outline: none; }
 .field input:focus, .field textarea:focus { border-color: var(--accent); }
 .seg { display: flex; background: var(--surface-2); border-radius: 12px; padding: 3px; }
-.seg > * { flex: 1; height: 34px; border-radius: 10px; font-size: 14px; color: var(--muted); text-align: center; }
+.seg > * { flex: 1; height: 34px; border-radius: 10px; font-size: 14px; color: var(--muted); text-align: center; display: flex; align-items: center; justify-content: center; gap: 4px; min-width: 0; }
 .seg > .sel { background: var(--surface); color: var(--text); box-shadow: var(--shadow); font-weight: 600; }
 .call { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-top: 1px solid var(--line); }
 .call:first-child { border-top: 0; padding-top: 0; }
@@ -359,3 +359,8 @@ details.more p { margin: 8px 0 0; }
 .keta-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .keta-head b { font-weight: 600; }
 .keta .kv:first-of-type { border-top: 0; }
+.kv-btn { display: flex; justify-content: space-between; align-items: center; gap: 14px; width: 100%; padding: 0 0 10px; font-size: 15px; color: var(--text); text-align: left; }
+.kv-btn .k { color: var(--muted); }
+.kv-btn .v { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; }
+.kv-btn .v svg.i { width: 15px; height: 15px; }
+.kv-btn .v.claude { color: var(--claude); }
